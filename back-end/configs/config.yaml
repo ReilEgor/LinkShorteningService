@@ -1,0 +1,10 @@
+app:
+  name: "LinkShorteningService"
+  level: "info"
+  version: "1.0.0"
+http:
+  port: 8080
+  timeout: 30s
+db:
+  max_connections: 20
+  driver: "postgres"
