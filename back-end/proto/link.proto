@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package link;
+option go_package = "internal/delivery/grpc/gen";
+
+service LinkService {
+  rpc AddLink (AddLinkRequest) returns (LinkResponse);
+  rpc GetLink (GetLinkRequest) returns (LinkResponse);
+}
+
+message AddLinkRequest {
+  string longURL = 1;
+}
+
+message GetLinkRequest {
+  string shortURL = 1;
+}
+
+message LinkResponse {
+  string id = 1;
+  string longURL = 2;
+  string shortURL = 3;
+}

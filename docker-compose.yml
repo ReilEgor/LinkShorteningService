@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:15-alpine
-    container_name: db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -17,9 +16,9 @@ services:
   back-end:
     build:
       context: ./back-end
-    container_name: back-end
     ports:
       - "8080:8080"
+      - "50051:50051"
     env_file:
       - .env
     depends_on:
@@ -29,6 +28,5 @@ services:
   front-end:
     build:
       context: ./front-end
-    container_name: front-end
     ports:
       - "3000:80"

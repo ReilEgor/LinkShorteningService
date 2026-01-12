@@ -12,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/config"
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/repository/postgres"
+	"github.com/ReilEgor/LinkShorteningService/internal/config"
+	apigRPC "github.com/ReilEgor/LinkShorteningService/internal/delivery/gRPC"
+	"github.com/ReilEgor/LinkShorteningService/internal/repository/postgres"
+	"github.com/ReilEgor/LinkShorteningService/pkg/logger"
 
-	api "github.com/ReilEgor/CleanArchitectureGolang/internal/delivery/http"
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/usecase"
+	apiHTTP "github.com/ReilEgor/LinkShorteningService/internal/delivery/http"
+	"github.com/ReilEgor/LinkShorteningService/internal/usecase"
 )
 
 func initDB(url string) (*sql.DB, error) {
@@ -42,52 +44,69 @@ func Run() error {
 		return err
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	myLogger := slog.New(&logger.ContextHandler{Handler: h})
+	slog.SetDefault(myLogger)
 
 	db, err := initDB(cfg.DB.URL)
 	if err != nil {
-		return fmt.Errorf("postgres connection failed: %w", err)
+		return fmt.Errorf("database connection failed: %w", err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		err := db.Close()
+		if err != nil {
+			myLogger.Error("database close failed:", err)
+		}
+	}(db)
 
-	repo := postgres.NewTaskRepo(db)
+	repo := postgres.NewLinkRepo(db)
 
-	uc := usecase.NewTaskUsecase(repo)
+	uc := usecase.NewLinkUsecase(repo, myLogger)
 
-	handler := api.NewGinServer(uc)
+	handler := apiHTTP.NewGinServer(uc, myLogger)
 
 	httpServer := &http.Server{
-		Addr:    ":" + cfg.HTTP.Port,
-		Handler: handler.GetRouter(),
+		Addr:         ":" + cfg.HTTP.Port,
+		Handler:      handler.GetRouter(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	serverErrors := make(chan error, 1)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	go func() {
-		slog.Info("Server is starting on", "port", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErrors <- err
+		if err := apigRPC.RunGRPCServer(ctx, "50051", uc, myLogger); err != nil {
+			serverErrors <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
 
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		slog.Info("server is starting",
+			slog.String("addr", httpServer.Addr),
+		)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- fmt.Errorf("listen and serve: %w", err)
+		}
+	}()
 
 	select {
 	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
+		return fmt.Errorf("critical error: %w", err)
+	case <-ctx.Done():
+		slog.Info("shutdown signal received")
+	}
 
-	case sig := <-shutdown:
-		slog.Info("Start shutdown", "signal", sig.String())
+	slog.Info("stopping servers...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := httpServer.Shutdown(ctx); err != nil {
-			httpServer.Close()
-			return fmt.Errorf("could not stop server gracefully: %w", err)
-		}
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		myLogger.Error("http shutdown failed", "error", err)
+		return fmt.Errorf("could not stop http server: %w", err)
 	}
 
 	slog.Info("Server stopped correctly")

@@ -3,7 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/server"
+	"github.com/ReilEgor/LinkShorteningService/internal/server"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {

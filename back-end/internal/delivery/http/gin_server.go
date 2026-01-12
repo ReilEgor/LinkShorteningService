@@ -1,20 +1,29 @@
 package http
 
 import (
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/usecase"
+	"log/slog"
+
+	"github.com/ReilEgor/LinkShorteningService/internal/delivery/http/handler"
+	"github.com/ReilEgor/LinkShorteningService/internal/delivery/http/middleware"
+	"github.com/ReilEgor/LinkShorteningService/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
 
 type ginServer struct {
 	router *gin.Engine
-	uc     *usecase.TaskUsecase
+	uc     *usecase.LinkUsecase
+	logger *slog.Logger
 }
 
-func NewGinServer(uc *usecase.TaskUsecase) *ginServer {
+func NewGinServer(uc *usecase.LinkUsecase, logger *slog.Logger) *ginServer {
 	s := &ginServer{
-		router: gin.Default(),
+		router: gin.New(),
 		uc:     uc,
+		logger: logger,
 	}
+	s.router.Use(gin.Recovery())
+
+	s.router.Use(middleware.RequestIDMiddleware())
 	s.mapRoutes()
 	return s
 }
@@ -24,12 +33,11 @@ func (s *ginServer) Run(port string) error {
 }
 
 func (s *ginServer) mapRoutes() {
-	h := NewTaskHandler(s.uc)
-
+	h := handler.NewLinkHandler(s.uc, s.logger)
 	v1 := s.router.Group("/api/v1")
 	{
-		v1.GET("/tasks", h.GetTasks)
-		v1.POST("/tasks", h.CreateTask)
+		v1.GET("/:shortURL", h.GetLink)
+		v1.POST("/longURL", h.AddLink)
 	}
 }
 

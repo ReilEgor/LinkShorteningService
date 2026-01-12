@@ -1,31 +1,60 @@
 package repository
 
 import (
+	"context"
+	"errors"
+	"strconv"
 	"sync"
 
-	"github.com/ReilEgor/CleanArchitectureGolang/internal/domain"
+	"github.com/ReilEgor/LinkShorteningService/internal/domain"
 )
 
-type MemoryTaskRepo struct {
-	mu    sync.Mutex
-	tasks []domain.Task
+type MemoryLinkRepo struct {
+	mu     sync.RWMutex
+	links  map[uint64]domain.Link
+	nextID uint64
 }
 
-func NewMemoryTaskRepo() *MemoryTaskRepo {
-	return &MemoryTaskRepo{tasks: []domain.Task{}}
+func NewMemoryLinkRepo() *MemoryLinkRepo {
+	return &MemoryLinkRepo{
+		links:  make(map[uint64]domain.Link),
+		nextID: 1,
+	}
 }
 
-func (r *MemoryTaskRepo) Create(t *domain.Task) error {
+func (r *MemoryLinkRepo) Create(ctx context.Context, t *domain.Link) (uint64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	t.ID = len(r.tasks) + 1
-	r.tasks = append(r.tasks, *t)
-	return nil
+	id := r.nextID
+	t.ID = strconv.FormatUint(id, 10)
+
+	r.links[id] = *t
+	r.nextID++
+
+	return id, nil
 }
 
-func (r *MemoryTaskRepo) GetAll() ([]domain.Task, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.tasks, nil
+func (r *MemoryLinkRepo) Get(ctx context.Context, id uint64) (domain.Link, error) {
+	select {
+	case <-ctx.Done():
+		return domain.Link{}, ctx.Err()
+	default:
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	link, ok := r.links[id]
+	if !ok {
+		return domain.Link{}, errors.New("link not found in database")
+	}
+
+	return link, nil
 }
